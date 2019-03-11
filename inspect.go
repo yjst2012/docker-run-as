@@ -33,7 +33,11 @@ func Create(host, container string) (*DockerInspect, error) {
 	}
 	var facts map[string]interface{}
 	err = json.Unmarshal(output, &facts)
-	inspect := DockerInspect{Name: host, Container: container, Output: string(output), Facts: facts, Pretty: true}
+	if err != nil {
+		log.Println("err unmarshal", string(output))
+		return nil, err
+	}
+	inspect := DockerInspect{Name: host, Container: container, Output: string(output), Facts: facts, Pretty: false}
 	return &inspect, nil
 }
 
@@ -46,45 +50,39 @@ func Read(output []byte) (*DockerInspect, error) {
 		return nil, err
 	}
 	inspect := DockerInspect{Output: string(output), Facts: facts, Pretty: true}
-	//log.Println("unmarshaled", inspect)
 	return &inspect, nil
 }
 
 func (self *DockerInspect) GetFact(path string) (string, error) {
 
-	parts := strings.Split(path, ".")
-	m := self.Facts
-
-	for i := 0; i < len(parts)-1; i++ {
-		p := parts[i]
-		m = m[p].(map[string]interface{})
+	facts, err := self.GetFactInterface(path)
+	if err != nil {
+		if !strings.Contains(err.Error(), "nil value") {
+			log.Println("error in get facts", err)
+		}
+		return "", err
 	}
-	v := reflect.ValueOf(m[parts[len(parts)-1]])
+	v := reflect.ValueOf(facts)
 	if v.Kind() != reflect.String {
-		log.Println("target at", path, "is not string #", v.Kind())
-		return "", errors.New("target is not a string!")
+		log.Println("wrong type of", path, v.Kind())
+		return "", errors.New("wrong type of " + path + v.Kind().String())
 	}
-
-	value := m[parts[len(parts)-1]].(string)
-	return value, nil
+	return facts.(string), nil
 }
 
 // for slice of multiple strings
 func (self *DockerInspect) GetFactStringSlice(path string) ([]string, error) {
 	facts, err := self.GetFactInterface(path)
 	if err != nil {
-		log.Println("error in get facts", err)
+		if !strings.Contains(err.Error(), "nil value") {
+			log.Println("error in get facts", err)
+		}
 		return []string{}, err
 	}
-	if facts == nil || reflect.ValueOf(facts).IsNil() {
-		return []string{}, nil
-	}
-	//log.Println("factss", facts, reflect.ValueOf(facts).Kind())
-
 	v := reflect.ValueOf(facts)
 	if v.Kind() != reflect.Slice {
 		log.Println("wrong type of", path, v.Kind())
-		return []string{}, nil
+		return []string{}, errors.New("wrong type of " + path + v.Kind().String())
 	}
 	str := []string{}
 	for i := 0; i < v.Len(); i++ {
@@ -95,40 +93,48 @@ func (self *DockerInspect) GetFactStringSlice(path string) ([]string, error) {
 }
 
 func (self *DockerInspect) GetFactBool(path string) (bool, error) {
-
-	parts := strings.Split(path, ".")
-	m := self.Facts
-
-	for i := 0; i < len(parts)-1; i++ {
-		p := parts[i]
-		m = m[p].(map[string]interface{})
+	facts, err := self.GetFactInterface(path)
+	if err != nil {
+		if !strings.Contains(err.Error(), "nil value") {
+			log.Println("error in get facts", err)
+		}
+		return false, err
 	}
-	value := m[parts[len(parts)-1]].(bool)
-	return value, nil
+	v := reflect.ValueOf(facts)
+	if v.Kind() != reflect.Bool {
+		log.Println("wrong type of", path, v.Kind())
+		return false, errors.New("wrong type of " + path + v.Kind().String())
+	}
+	return facts.(bool), nil
 }
 
 func (self *DockerInspect) GetFactMap(path string) (map[string]interface{}, error) {
 
-	parts := strings.Split(path, ".")
-	m := self.Facts
-
-	for i := 0; i < len(parts); i++ {
-		p := parts[i]
-		i := m[p]
-		//fmt.Printf("type is %T", i)
-		m = i.(map[string]interface{})
-		//log.Println("part", p, "value", m)
+	facts, err := self.GetFactInterface(path)
+	if err != nil {
+		if !strings.Contains(err.Error(), "nil value") {
+			log.Println("error in get facts", err)
+		}
+		return nil, err
 	}
-	return m, nil
+	v := reflect.ValueOf(facts)
+	if v.Kind() != reflect.Map {
+		log.Println("wrong type of", path, v.Kind())
+		return nil, errors.New("wrong type of " + path + v.Kind().String())
+	}
+	return facts.(map[string]interface{}), nil
 }
 
 func (self *DockerInspect) GetFactInterface(path string) (interface{}, error) {
-
 	parts := strings.Split(path, ".")
 	m := self.Facts
-
-	for i := 0; i < len(parts)-1; i++ {
+	last := len(parts)
+	for i := 0; i < last-1; i++ {
 		p := parts[i]
+		if m[p] == nil || reflect.ValueOf(m[p]).IsNil() {
+			log.Println("nil value @", p, "when getting", path)
+			return nil, errors.New("nil value @" + p + "when getting" + path)
+		}
 		switch m[p].(type) {
 		case map[string]interface{}:
 			m = m[p].(map[string]interface{})
@@ -137,25 +143,22 @@ func (self *DockerInspect) GetFactInterface(path string) (interface{}, error) {
 			return nil, errors.New("alert, value is not a map, incompatible type\n")
 		}
 	}
-	if m[parts[len(parts)-1]] == nil {
-		return nil, nil
+	if m[parts[last-1]] == nil /* || reflect.ValueOf(m[parts[last-1]]).IsNil()*/ {
+		log.Println("nil value @", parts[last-1], "when getting", path)
+		return nil, errors.New("nil value @" + parts[last-1] + "when getting" + path)
 	}
-	return m[parts[len(parts)-1]], nil
+	return m[parts[last-1]], nil
 }
 
 // for slice of multiple strings
 func (self *DockerInspect) MultiOption(path, option string) error {
-	//log.Println("path", path, "options", option)
-	facts, err := self.GetFactInterface(path) // facts is interface{}
+	facts, err := self.GetFactInterface(path)
 	if err != nil {
-		log.Println("error in get facts", err)
+		if !strings.Contains(err.Error(), "nil value") {
+			log.Println("error in getting facts", err)
+		}
 		return err
 	}
-	if facts == nil || reflect.ValueOf(facts).IsNil() {
-		return nil
-	}
-	//log.Println("facts", facts, reflect.ValueOf(facts).Kind())
-
 	v := reflect.ValueOf(facts)
 	if v.Kind() != reflect.Slice {
 		log.Println("wrong type of", path, v.Kind())
@@ -286,14 +289,11 @@ func (self *DockerInspect) ParseDevices() error {
 
 	facts, err := self.GetFactInterface("HostConfig.Devices")
 	if err != nil {
-		log.Println("error in getting HostConfig.Devices", err)
+		if !strings.Contains(err.Error(), "nil value") {
+			log.Println("error in get facts", err)
+		}
 		return err
 	}
-	if facts == nil || reflect.ValueOf(facts).IsNil() {
-		return nil
-	}
-	log.Println("facts", facts)
-
 	v := reflect.ValueOf(facts)
 	if v.Kind() != reflect.Slice {
 		log.Println("wrong type of HostConfig.Devices", v.Kind())
@@ -411,7 +411,7 @@ func (self *DockerInspect) ParseMacaddress() error {
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Println("cannot find Config.MacAddress", r)
+			//log.Println("cannot find Config.MacAddress", r)
 			return
 		}
 	}()
@@ -435,7 +435,7 @@ func quote(part string) string {
 }
 
 func (self *DockerInspect) FormatCli() (string, error) {
-	self.Output = "docker run "
+	self.Output = "docker run -d "
 
 	image, err := self.GetFact("Config.Image")
 	if err != nil {
@@ -454,10 +454,165 @@ func (self *DockerInspect) FormatCli() (string, error) {
 
 	self.ParseHostname()
 	self.ParseUser()
-	self.ParseMacaddress()
+	//self.ParseMacaddress()
 
 	self.MultiOption("Config.Env", "env")
 	self.MultiOption("HostConfig.Binds", "volume")
+	self.MultiOption("HostConfig.VolumesFrom", "volumes-from")
+	self.MultiOption("HostConfig.CapAdd", "cap-add")
+	self.MultiOption("HostConfig.CapDrop", "cap-drop")
+	self.MultiOption("HostConfig.Dns", "dns")
+
+	network_mode, err := self.GetFact("HostConfig.NetworkMode")
+	if err != nil {
+		log.Println("get fact HostConfig.NetworkMode err", err)
+		return "", err
+	}
+	if network_mode != "default" {
+		self.Options = append(self.Options, "--network="+network_mode)
+	}
+	privileged, err := self.GetFactBool("HostConfig.Privileged")
+	if err != nil {
+		log.Println("get fact HostConfig.Privileged err", err)
+		return "", err
+	}
+	if privileged {
+		self.Options = append(self.Options, "--privileged")
+	}
+	self.ParseVolumes()
+	self.ParsePorts()
+	self.ParseLinks()
+	self.ParseRestart()
+	self.ParseDevices()
+	self.ParseLabels()
+	self.ParseLogs()
+	self.ParseExtraHosts()
+
+	stdout_attached, err := self.GetFactBool("Config.AttachStdout")
+	if err != nil {
+		log.Println("get fact Config.AttachStdout err", err)
+		return "", err
+	}
+	if stdout_attached {
+		self.Options = append(self.Options, "--detach=true")
+	}
+	tty, err := self.GetFactBool("Config.Tty")
+	if err != nil && tty {
+		self.Options = append(self.Options, "-t")
+	}
+
+	parameters := []string{"run -d"}
+	if len(self.Options) > 0 {
+		parameters = append(parameters, self.Options...)
+	}
+	parameters = append(parameters, image)
+
+	cmd, err := self.GetFactInterface("Config.Cmd")
+	if err != nil {
+		if !strings.Contains(err.Error(), "nil value") {
+			log.Println("error in getting Config.Cmd", err)
+		}
+		return "", err
+	}
+	v := reflect.ValueOf(cmd)
+	if v.Kind() == reflect.Slice {
+		for i := 0; i < v.Len(); i++ {
+			cmd := v.Index(i).Interface().(string)
+			parameters = append(parameters, quote(cmd))
+		}
+	}
+	joiner := " "
+	if self.Pretty {
+		joiner += "\\\n\t"
+	}
+	para := strings.Join(parameters, joiner)
+	return "docker " + para, nil
+}
+
+/*
+	for _, g := range thisCluster.ServiceGroup {
+		name := g.ServiceName
+		inspect, err := sshdocker.Create(master[0].InternalIP, name)
+		if err != nil {
+			log.Println("err", err)
+		} else {
+			cmd, err := inspect.FormatCli()
+			if err == nil {
+				log.Println("restarting container:", name)
+				ccssh.Command(master[0].InternalIP, "docker", "rm -f", name).Run()
+				time.Sleep(time.Second)
+				ccssh.Command(master[0].InternalIP, cmd).Run()
+				log.Println("done")
+			}
+		}
+	}
+*/
+
+func (self *DockerInspect) GetImageID() (string, error) {
+	image, err := self.GetFact("Config.Image")
+	if err != nil {
+		log.Println("get fact image err", err)
+		return "", err
+	}
+	return image, nil
+}
+
+func (self *DockerInspect) GetProtectedDir() ([]string, []string, error) {
+
+	facts, err := self.GetFactInterface("HostConfig.Binds")
+	if err != nil {
+		if !strings.Contains(err.Error(), "nil value") {
+			log.Println("error in get HostConfig.Binds", err)
+		}
+		return []string{}, []string{}, err
+	}
+	if facts == nil || reflect.ValueOf(facts).IsNil() {
+		return []string{}, []string{}, nil
+	}
+
+	v := reflect.ValueOf(facts)
+	if v.Kind() != reflect.Slice {
+		log.Println("wrong type of", "HostConfig.Binds", v.Kind())
+		return []string{}, []string{}, nil
+	}
+	src := []string{}
+	dest := []string{}
+	for i := 0; i < v.Len(); i++ {
+		val := quote(v.Index(i).Interface().(string))
+		add := strings.Split(val, ":")
+		src = append(src, add[0])
+		dest = append(dest, add[1])
+
+		//value := fmt.Sprintf("--%s=%s", "volume", quote(val))
+		//self.Options = append(self.Options, value)
+	}
+	return src, dest, nil
+}
+
+func (self *DockerInspect) GetServiceName() (string, error) {
+
+	name, err := self.GetFact("Name")
+	if err == nil {
+		n := strings.Split(name, "/")
+		if len(n) > 0 {
+			//self.Options = append(self.Options, "--name="+n[1])
+			return n[1], nil
+		} else {
+			return n[0], nil
+		}
+	}
+	return "", errors.New("name not found")
+}
+
+func (self *DockerInspect) GetDockerCmdPassin() (string, error) {
+
+	self.Options = []string{}
+
+	self.ParseHostname()
+	self.ParseUser()
+	//self.ParseMacaddress()
+
+	self.MultiOption("Config.Env", "env")
 	self.MultiOption("HostConfig.VolumesFrom", "volumes-from")
 	self.MultiOption("HostConfig.CapAdd", "cap-add")
 	self.MultiOption("HostConfig.CapDrop", "cap-drop")
@@ -499,32 +654,39 @@ func (self *DockerInspect) FormatCli() (string, error) {
 		self.Options = append(self.Options, "-t")
 	}
 
-	parameters := []string{"run"}
+	parameters := []string{}
 	if len(self.Options) > 0 {
 		parameters = append(parameters, self.Options...)
 	}
-	parameters = append(parameters, image)
 
+	joiner := " "
+	/*
+		if self.Pretty {
+			joiner += "\\\n\t"
+		}
+	*/
+	para := strings.Join(parameters, joiner)
+	return para, nil
+}
+
+func (self *DockerInspect) GetDockerContainerCmd() (string, error) {
 	cmd, err := self.GetFactInterface("Config.Cmd")
 	if err != nil {
-		log.Println("get fact Config.Cmd err", err)
+		if !strings.Contains(err.Error(), "nil value") {
+			log.Println("get fact Config.Cmd err", err)
+		}
 		return "", err
 	}
+	result := ""
 	v := reflect.ValueOf(cmd)
 	if v.Kind() == reflect.Slice {
 		for i := 0; i < v.Len(); i++ {
 			cmd := v.Index(i).Interface().(string)
-			parameters = append(parameters, quote(cmd))
+			result += quote(cmd) + " "
 		}
 	}
-	joiner := " "
-	if self.Pretty {
-		joiner += "\\\n\t"
-	}
-	para := strings.Join(parameters, joiner)
-	return "docker " + para, nil
+	return result, nil
 }
-
 func main() {
 	data, err := ioutil.ReadFile("./inspect_test.json")
 	if err != nil {
