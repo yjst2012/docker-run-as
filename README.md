@@ -3,6 +3,7 @@ retrieve "docker run" from "docker inspect" of existing containers
 
 example:
 go run inspect.go
+
 2019/02/08 15:33:57 output cmd:
  docker run \
 	--name=owncloud \
