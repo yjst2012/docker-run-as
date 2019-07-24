@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"git.unitecloud.net/bahus.vel/CRaaSH/ccssh"
 )
 
 type DockerInspect struct {
@@ -23,7 +21,7 @@ type DockerInspect struct {
 	Pretty    bool
 	//App       *DockerApp
 }
-
+/*
 func Create(host, container string) (*DockerInspect, error) {
 
 	output, err := ccssh.Command(host, "docker", "inspect", container).Output()
@@ -40,7 +38,7 @@ func Create(host, container string) (*DockerInspect, error) {
 	inspect := DockerInspect{Name: host, Container: container, Output: string(output), Facts: facts, Pretty: false}
 	return &inspect, nil
 }
-
+*/
 func Read(output []byte) (*DockerInspect, error) {
 
 	var facts map[string]interface{}
