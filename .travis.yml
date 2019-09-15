@@ -8,5 +8,5 @@ before_install: # 安装 makefile 需要的一些包，其实也可以放在 ins
 - sudo apt-get update -qq
 - sudo apt-get install -qq -y make
 install: true # 跳过 install 阶段，因为我已经定义了 before_install。其实 go 项目是需要安装依赖的，只是我放到了下面的 make mycli 命令中做
-script: make fmt && make  # 先检查格式，然后编译
+script: go build inspect.go  # 先检查格式，然后编译
 
