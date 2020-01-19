@@ -1,5 +1,5 @@
 # docker-run-as
-retrieve "docker run" from "docker inspect" of existing containers
+retrieve "docker run" command from "docker inspect" of running containers
 
 example:
 go run inspect.go
